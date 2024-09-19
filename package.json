@@ -9,5 +9,8 @@
     "bit-buffer": "^0.2.5",
     "prompt-sync": "^4.2.0",
     "zlib": "^1.0.5"
+  },
+  "devDependencies": {
+    "esbuild": "0.23.1"
   }
 }
