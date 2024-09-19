@@ -257,7 +257,7 @@
 
 		
 		console.log("\nEnter the path to the folder where you want to save the records: ");
-		const recordsPath = prompt().trim().replace(/['"]/g, '');
+		let recordsPath = prompt().trim().replace(/['"]/g, '');
 		
 		if(recordsPath.endsWith("/"))
 		{
@@ -553,7 +553,7 @@
 
 		let option = parseInt(prompt().trim());
 
-		if(option < 1 || option > options.length || option === NaN)
+		if(option < 1 || option > options.length || Number.isNaN(option))
 		{
 			console.log("Invalid option. Please enter a valid option.");
 			continue;
