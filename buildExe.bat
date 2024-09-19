@@ -1,0 +1,1 @@
+nexe --build -i h2Tools.js -t x64-14.15.3 -r "lookupFiles/*.json" -o "h2Tools.exe" --verbose 

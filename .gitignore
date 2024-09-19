@@ -1,0 +1,10 @@
+node_modules/
+**/*.exe
+.vs/
+**/*.xlsx
+**/*.dat
+*.H2
+./*.JSON
+records/
+nflRecords/
+convertedRecords/

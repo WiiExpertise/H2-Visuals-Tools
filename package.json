@@ -1,0 +1,13 @@
+{
+  "name": "h2-visuals-tools",
+  "version": "1.0.0",
+  "description": "A tool to parse and convert EA Sports H2 CharacterVisuals Files",
+  "main": "h2DbParser.js",
+  "author": "WiiExpertise",
+  "license": "ISC",
+  "dependencies": {
+    "bit-buffer": "^0.2.5",
+    "prompt-sync": "^4.2.0",
+    "zlib": "^1.0.5"
+  }
+}
