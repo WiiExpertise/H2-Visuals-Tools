@@ -1,7 +1,16 @@
 # H2 Visuals Tools
-This tool allows for reading and writing EA Sports H2 archive files, typically used for CharacterVisuals data. Additionally, it supports converting legacy visuals JSON files to the H2 format.
+This tool allows for reading and writing EA Sports H2 archive files, typically used for CharacterVisuals data.
+
+## Supported functionality
+- Extract records from H2 archive to .dat
+- Write .dat records to H2 archive
+- Convert legacy CharacterVisuals JSON files to H2 archive
 
 ## Usage
+1. Download the latest executable from [releases](https://github.com/WiiExpertise/h2-visuals-tools/releases/latest)
+2. Run the executable and follow the included prompts
+
+## Building
 1. Clone the repository:
    ```bash
     git clone https://github.com/your-username/h2-visuals-tools.git
