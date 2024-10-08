@@ -1,10 +1,11 @@
 # H2 Visuals Tools
-This tool allows for reading and writing EA Sports H2 archive files, typically used for CharacterVisuals data.
+This tool allows for reading, writing, and converting EA Sports H2 archive files, typically used for CharacterVisuals data.
 
 ## Supported functionality
 - Extract records from H2 archive to .dat
 - Write .dat records to H2 archive
 - Convert legacy CharacterVisuals JSON files to H2 archive
+- Convert H2 archive to legacy CharacterVisuals JSON file
 
 ## Usage
 1. Download the latest executable from [releases](https://github.com/WiiExpertise/h2-visuals-tools/releases/latest)
@@ -48,7 +49,7 @@ With H2, one of the key differences compared to a standard TDB2 table is that it
 
 Once you read/decompress a data chunk, you get another file that is very similar to the TDB2 format. This time, it's a table called ``CHVI``. Each instance of this table only contains one record. The only difference between this and a standard TDB2 file is that it adds a new field type: array (4). This new field type allows for storing variable arrays of TDB2 fields, which is used for storing loadout and blend information in CharacterVisuals.
 
-This tool works by taking the H2 file, reading each compressed chunk, decompressing it using ``zlib.gunzip``, and dumping all of the decompressed records into a folder. When writing back to H2, the tool writes the number of decompressed records to the H2 file, compresses each record with ``zlib.gzip``, and then writes all the records to file, including header information. Finally, when converting from a JSON to H2, the tool parses the JSON object, and then iterating through each player record, it writes each field in the object to a decompressed record file before following the same process as writing back to H2.
+This tool works by taking the H2 file, reading each compressed chunk, decompressing it using ``zlib.gunzip``, and dumping all of the decompressed records into a folder. When writing back to H2, the tool writes the number of decompressed records to the H2 file, compresses each record with ``zlib.gzip``, and then writes all the records to file, including header information. When converting from a JSON to H2, the tool parses the JSON object, and then iterating through each player record, it writes each field in the object to a decompressed record file before following the same process as writing back to H2. Finally, when converting from H2 to JSON, the tool reads each decompressed record in the H2 file, and then uses a field lookup to associate the 4 character field keys with the full JSON field name.
 
 ## Acknowledgements
 Thanks to the following people for their contributions:
