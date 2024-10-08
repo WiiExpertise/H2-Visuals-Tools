@@ -43,6 +43,10 @@
     "key": "LDCT",
     "type": 0
   },
+  "loadoutType": {
+    "key": "LDTY",
+    "type": 0
+  },
   "loadoutElements": {
     "key": "PINS",
     "type": 4
