@@ -572,7 +572,7 @@
 			const recordByteSize = utilFunctions.readModifiedLebEncodedNumber(parser);
 
 			const recordData = parser.readBytes(recordByteSize);
-			const decompressedData = await decompressBuffer(recordData);
+			const decompressedData = await utilFunctions.decompressBuffer(recordData);
 
 			if(recordKey === 0)
 			{
