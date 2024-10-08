@@ -1,17 +1,18 @@
 (async() => {
 	// Required modules
 	const fs = require('fs');
-	const { promisify } = require('node:util');
-	const zlib = require('zlib');
-	const deflate = promisify(zlib.deflate);
-	const inflate = promisify(zlib.inflate);
 	const prompt = require('prompt-sync')();
-	const { BitView } = require('bit-buffer');
+	const utilFunctions = require('./utils/UtilFunctions');
+	const { FileParser } = require('./utils/fileParser');
 
 	// Required lookup files
 	const slotNumLookup = JSON.parse(fs.readFileSync('lookupFiles/slotNumLookup.json', 'utf8'));
+	const slotsLookup = JSON.parse(fs.readFileSync('lookupFiles/slotsLookup.json', 'utf8'));
 	const fieldLookup = JSON.parse(fs.readFileSync('lookupFiles/fieldLookup.json', 'utf8'));
 	const enumLookup = JSON.parse(fs.readFileSync('lookupFiles/enumLookup.json', 'utf8'));
+
+	// Version number constant
+	const VERSION_STRING = "v1.1";
 
 	// Field type constants
 	const FIELD_TYPE_INT = 0;
@@ -19,241 +20,22 @@
 	const FIELD_TYPE_ARRAY = 4;
 	const FIELD_TYPE_FLOAT = 10;
 
-	// Global data buffer for reading
-	let fileData;
-
-	// Convert object keys to lowercase
-	function normalizeKeys(obj) 
-	{
-		return Object.keys(obj).reduce((acc, key) => {
-			acc[key.toLowerCase()] = obj[key];
-			return acc;
-		}, {});
-	}
-
-	// Function to read a modified LEB128 encoded number
-	function readModifiedLebEncodedNumber()
-	{
-		let byteArray = [];
-		let currentByte;
-
-		do
-		{
-			currentByte = readByte().readUInt8(0);
-			byteArray.push(currentByte);
-		}
-		while((currentByte & 0x80));
-		
-		let value = 0;
-		let isNegative = false;
-
-		const buf = Buffer.from(byteArray);
-
-		for (let i = (buf.length - 1); i >= 0; i--) {
-			let currentByte = buf.readUInt8(i);
-
-			if (i !== (buf.length - 1)) {
-			currentByte = currentByte ^ 0x80;
-			}
-
-			if (i === 0 && (currentByte & 0x40) === 0x40) {
-			currentByte = currentByte ^ 0x40;
-			isNegative = true;
-			}
-
-			let multiplicationFactor = 1 << (i * 6);
-
-			if (i > 1) {
-			multiplicationFactor = multiplicationFactor << 1;
-			}
-
-			value += currentByte * multiplicationFactor;
-
-			if (isNegative) {
-			value *= -1;
-			}
-		}
-
-		return value;
-	}
-
-	// Function to convert a number to the modified LEB128 encoding
-	function writeModifiedLebEncodedNumber(value) 
-	{
-		const isNegative = value < 0;
-		value = Math.abs(value);
-	
-		if (value <= 63) 
-		{
-			const buffer = Buffer.from([value]);
-			const bv = new BitView(buffer, buffer.byteOffset);
-		
-			if (isNegative) 
-			{
-				bv.setBits(6, 1, 1);
-			}
-		
-			return buffer;
-		}
-		else if (value > 63 && value < 8192) 
-		{
-			const buffer = Buffer.from([0x0, 0x0]);
-			const bv = new BitView(buffer, buffer.byteOffset);
-			
-			const lowerBitValue = value % 64;
-			bv.setBits(0, lowerBitValue, 6);
-		
-			if (isNegative) 
-			{
-				bv.setBits(6, 1, 1);
-			}
-		
-			bv.setBits(7, 1, 1);
-			
-			const higherBitValue = Math.floor(value / 64);
-			bv.setBits(8, higherBitValue, 8);
-		
-			return buffer;
-			}
-			else 
-			{
-			const buffer = Buffer.from([0x0, 0x0, 0x0]);
-			const bv = new BitView(buffer, buffer.byteOffset);
-		
-			const lowerBitValue = value % 64;
-			bv.setBits(0, lowerBitValue, 6);
-		
-			if (isNegative)
-			{
-				bv.setBits(6, 1, 1);
-			}
-		
-			bv.setBits(7, 1, 1);
-			
-			const midBitValue = Math.floor((value - 8192) / 64);
-			bv.setBits(8, midBitValue, 7);
-			bv.setBits(15, 1, 1);
-		
-			const highBitValue = Math.floor(value / 8192);
-			bv.setBits(16, highBitValue, 8);
-		
-			return buffer;
-		}
-	}
-
-	// Global offset for reading the buffer
-	let offset = 0;
-
-	// Function to read a specified number of bytes from the buffer
-	function readBytes(length) 
-	{
-		const bytes = fileData.subarray(offset, offset + length);
-		offset += length;
-		return bytes;
-	}
-
-	// Function to read a single byte from the buffer
-	function readByte() 
-	{
-		return fileData.subarray(offset++, offset);
-	}
-
-	// Function to pad the buffer to the specified alignment
-	function pad(alignment)
-	{
-		while(offset % alignment !== 0)
-		{
-			offset++;
-		}
-	}
-
-	// Function to get uncompressed text from a 6-bit compressed buffer
-	function getUncompressedTextFromSixBitCompression(data) 
-	{
-		const bv = new BitView(data, data.byteOffset);
-		bv.bigEndian = true;
-		const numCharacters = (data.length * 8) / 6;
-		
-		let text = '';
-	
-		for (let i = 0; i < numCharacters; i++) 
-		{
-			text += String.fromCharCode(getCharCode(i * 6));
-		}
-	
-		return text;
-	
-		function getCharCode(offset) 
-		{
-			return bv.getBits(offset, 6) + 32;
-		}
-	}
-
-	// Function to convert a character to a 6-bit value
-	function charTo6Bit(c) {
-		// Map A-Z to 0-25, 0-9 to 26-35
-		if (c >= 'A' && c <= 'Z') 
-		{
-			return (c.charCodeAt(0) - 32);
-		}
-		else if (c >= '0' && c <= '9') 
-		{
-			return c.charCodeAt(0) - 32;
-		}
-		throw new Error("Unsupported character: " + c);
-	}
-	
-	// Function to compress a 4 character string to a 3 byte representation
-	function compress6BitString(str) 
-	{
-		if (str.length !== 4) 
-		{
-			throw new Error("Input string must be exactly 4 characters");
-		}
-	
-		// Convert each character to 6-bit value
-		let bits = [];
-		for (let i = 0; i < 4; i++) 
-		{
-			bits.push(charTo6Bit(str[i]));
-		}
-	
-		// Pack the 6-bit values into 3 bytes
-		let byte1 = (bits[0] << 2) | (bits[1] >> 4);
-		let byte2 = ((bits[1] & 0xF) << 4) | (bits[2] >> 2);
-		let byte3 = ((bits[2] & 0x3) << 6) | bits[3];
-	
-		return [byte1, byte2, byte3];
-	}
-
-	// Function to decompress a gzip compressed buffer
-	async function decompressBuffer(compressedBuffer) 
-	{
-		try 
-		{
-			const result = zlib.gunzipSync(compressedBuffer);
-			return result;
-		} 
-		catch (err) 
-		{
-			console.error('An error occurred during inflation:', err);
-		}
-	}
-
 	// Function to read records from an H2 file
 	async function readRecords()
 	{
 		// Set up data buffer
 		console.log("\nEnter the path to the H2 archive file: ");
 		const visualsPath = prompt().trim().replace(/['"]/g, '');
-		fileData = fs.readFileSync(visualsPath);
+		let fileData = fs.readFileSync(visualsPath);
+
+		let parser = new FileParser(fileData);
 
 		// Read the start of the file
-		const tableBytes = readBytes(3);
-		const tableName = getUncompressedTextFromSixBitCompression(tableBytes);
-		const type = readByte().readUInt8(0);
-		const unkBytes = readBytes(2);
-		const recordCount = readModifiedLebEncodedNumber();
+		const tableBytes = parser.readBytes(3);
+		const tableName = utilFunctions.getUncompressedTextFromSixBitCompression(tableBytes);
+		const type = parser.readByte().readUInt8(0);
+		const unkBytes = parser.readBytes(2);
+		const recordCount = utilFunctions.readModifiedLebEncodedNumber(parser);
 
 		
 		console.log("\nEnter the path to the folder where you want to save the records: ");
@@ -279,11 +61,11 @@
 		// Read each record
 		for(let i = 0; i < recordCount; i++)
 		{
-			const recordKey = readModifiedLebEncodedNumber();
-			const recordByteSize = readModifiedLebEncodedNumber();
+			const recordKey = utilFunctions.readModifiedLebEncodedNumber(parser);
+			const recordByteSize = utilFunctions.readModifiedLebEncodedNumber(parser);
 
-			const recordData = readBytes(recordByteSize);
-			const decompressedData = await decompressBuffer(recordData);
+			const recordData = parser.readBytes(recordByteSize);
+			const decompressedData = utilFunctions.decompressBuffer(recordData);
 
 			fs.writeFileSync(recordsPath + "/" + recordKey + ".dat", decompressedData);
 		}
@@ -292,18 +74,40 @@
 	}
 
 	// Function to write records to an H2 file
-	async function writeRecords(recordsPath = null, outputName = null)
+	async function writeRecords(recordsObject = null, outputName = null)
 	{
-		if(!recordsPath)
+		if(!recordsObject)
 		{
 			// Enter the path to the records folder
 			console.log("\nEnter the path to the folder containing the records:");
-			recordsPath = prompt().trim().replace(/['"]/g, '');
-		}
+			let recordsPath = prompt().trim().replace(/['"]/g, '');
 
-		if(recordsPath.endsWith("/"))
-		{
-			recordsPath = recordsPath.slice(0, -1);
+			recordsObject = {};
+
+			if(recordsPath.endsWith("/"))
+			{
+				recordsPath = recordsPath.slice(0, -1);
+			}
+
+			if(!fs.existsSync(recordsPath))
+			{
+				console.log("The specified path does not exist.");
+				return;
+			}
+
+			// Enumerate the records in the records folder
+			const files = fs.readdirSync(recordsPath);
+
+			// Sort the files in ascending order
+			files.sort((a, b) => parseInt(a.split(".")[0]) - parseInt(b.split(".")[0]));
+
+			for (const file of files)
+			{
+				const recordData = fs.readFileSync(recordsPath + "/" + file);
+				const recordKey = parseInt(file.split(".")[0]);
+				recordsObject[recordKey] = recordData;
+			}
+
 		}
 
 		if(!outputName)
@@ -313,16 +117,10 @@
 			outputName = prompt().trim().replace(/['"]/g, '');
 		}
 		
-		// Enumerate the records in the records folder
-		const files = fs.readdirSync(recordsPath);
-
-		// Sort the files in ascending order
-		files.sort((a, b) => parseInt(a.split(".")[0]) - parseInt(b.split(".")[0]));
-		
-		const newRecordCount = writeModifiedLebEncodedNumber(files.length);
+		const newRecordCount = utilFunctions.writeModifiedLebEncodedNumber(Object.values(recordsObject).length);
 
 		const unkBytes = Buffer.from([0x00, 0x02]);
-		const tableBytes = Buffer.from(compress6BitString("PLEX"));
+		const tableBytes = Buffer.from(utilFunctions.compress6BitString("PLEX"));
 
 		// Write the beginning of the file
 		let headerBuffer = Buffer.alloc(6 + newRecordCount.length);
@@ -333,16 +131,17 @@
 
 		let recordBufferArray = [];
 
+		let keysList = Object.keys(recordsObject).sort((a, b) => parseInt(a) - parseInt(b));
+
 		// Iterate through each record file
-		for(const file of files)
+		for(const key of keysList)
 		{
-			const recordKey = parseInt(file.split(".")[0]);
-			const recordData = fs.readFileSync(recordsPath + "/" + file);
+			const recordData = recordsObject[key];
 
-			const compressedData = zlib.gzipSync(recordData);
+			const compressedData = utilFunctions.compressBuffer(recordData);
 
-			const recordKeyBuffer = writeModifiedLebEncodedNumber(recordKey);
-			const recordSizeBuffer = writeModifiedLebEncodedNumber(compressedData.length);
+			const recordKeyBuffer = utilFunctions.writeModifiedLebEncodedNumber(key);
+			const recordSizeBuffer = utilFunctions.writeModifiedLebEncodedNumber(compressedData.length);
 
 			const recordBuffer = Buffer.concat([recordKeyBuffer, recordSizeBuffer, compressedData]);
 
@@ -417,13 +216,13 @@
 
 			if(field.key === "SLOT")
 			{
-				let lowerCaseSlotLookup = normalizeKeys(slotNumLookup);
+				let lowerCaseSlotLookup = utilFunctions.normalizeKeys(slotNumLookup);
 				valueToWrite = lowerCaseSlotLookup[valueToWrite.toLowerCase()];
 
 			}
 			else if(field.key === "USKT")
 			{
-				recordBufferArray.push(...compress6BitString(field.key));
+				recordBufferArray.push(...utilFunctions.compress6BitString(field.key));
 				recordBufferArray.push(field.type);
 				recordBufferArray.push(0xC0, 0xFE, 0xFB, 0x07);
 				continue;
@@ -445,19 +244,19 @@
 				}
 			}
 
-			recordBufferArray.push(...compress6BitString(field.key));
+			recordBufferArray.push(...utilFunctions.compress6BitString(field.key));
 			recordBufferArray.push(field.type);
 
 			if(field.type === FIELD_TYPE_INT)
 			{
-				let numberBytes = [...writeModifiedLebEncodedNumber(valueToWrite)];
+				let numberBytes = [...utilFunctions.writeModifiedLebEncodedNumber(valueToWrite)];
 				recordBufferArray.push(...numberBytes);
 			}
 			else if(field.type === FIELD_TYPE_STRING)
 			{
 				let stringBytes = [...Buffer.from(valueToWrite, 'utf8')];
 				stringBytes.push(0x00);
-				let stringLengthBytes = [...writeModifiedLebEncodedNumber(stringBytes.length)];
+				let stringLengthBytes = [...utilFunctions.writeModifiedLebEncodedNumber(stringBytes.length)];
 				recordBufferArray.push(...stringLengthBytes); 
 				recordBufferArray.push(...stringBytes);
 			}
@@ -497,20 +296,10 @@
 		const visualsPath = prompt().trim().replace(/['"]/g, '');
 		const visualsJsonData = JSON.parse(fs.readFileSync(visualsPath, 'utf8'))["characterVisualsPlayerMap"];
 
-		// Iterate through each key in the JSON data
-		const keys = Object.keys(visualsJsonData);
+		let recordsObject = {};
 
-		// If the convertedRecords folder doesn't exist, create it
-		if(!fs.existsSync("convertedRecords"))
-		{
-			fs.mkdirSync("convertedRecords");
-		}
-		else
-		{
-			// Clear out the convertedRecords folder
-			fs.rmSync("convertedRecords", { recursive: true });
-			fs.mkdirSync("convertedRecords");
-		}
+		// Iterate through each key in the JSON data
+		const keys = Object.keys(visualsJsonData).sort((a, b) => parseInt(a) - parseInt(b));
 
 		for(const key of keys)
 		{
@@ -525,7 +314,7 @@
 
 			// Write the record to a file
 			const recordBuffer = Buffer.from(recordBytes);
-			fs.writeFileSync(`convertedRecords/${key}.dat`, recordBuffer);
+			recordsObject[key] = recordBuffer;
 		}
 
 		// Output file info
@@ -533,14 +322,284 @@
 		const outputName = prompt().trim().replace(/['"]/g, '');
 
 		// Write the records to the output file
-		await writeRecords("convertedRecords", outputName);
+		await writeRecords(recordsObject, outputName);
 		
 	}
 
-	const options = ["Read records from H2 file", "Write records to H2 file", "Convert leaguevisuals JSON to H2 file", "Exit program"]; 
+	// Function to find object in JSON based on value of key
+	function findFieldByFieldKey(fieldKey)
+	{
+		const fields = Object.keys(fieldLookup);
+
+		for(const field of fields)
+		{
+			if(fieldLookup[field].key === fieldKey)
+			{
+				return field;
+			}
+		}
+	}
+
+	function findEnumValByNum(object, enumNum)
+	{
+		const fields = Object.keys(object);
+
+		for(const field of fields)
+		{
+			if(object[field] === enumNum)
+			{
+				return field;
+			}
+		}
+	}
+
+
+	// Function to read a CHVI array
+	function readChviArray(parser, arrayLength)
+	{
+		let array = [];
+
+		for(let i = 0; i < arrayLength; i++)
+		{
+			let recordObject = {};
+			let previousByte = -1;
+
+			do
+			{
+				if(previousByte !== -1)
+				{
+					parser.offset = parser.offset - 1;
+				}
+				let fieldKey = utilFunctions.getUncompressedTextFromSixBitCompression(parser.readBytes(3));
+				let fieldName = findFieldByFieldKey(fieldKey);
+
+				let fieldType = parser.readByte().readUInt8(0);
+
+				switch(fieldType)
+				{
+					case FIELD_TYPE_INT:
+						let intValue = utilFunctions.readModifiedLebEncodedNumber(parser);
+
+						if(!fieldName)
+						{
+							break;
+						}
+
+						// Check for special cases that require lookups
+						if(fieldName === "slotType")
+						{
+							intValue = slotsLookup[intValue];
+						}
+						else if(fieldName === "loadoutType" || fieldName === "loadoutCategory")
+						{
+							intValue = findEnumValByNum(enumLookup[fieldName], intValue);
+						}
+						else if(fieldName === "skinToneScale")
+						{
+							intValue = -8355712;
+						}
+
+						recordObject[fieldName] = intValue;
+						break;
+					case FIELD_TYPE_STRING:
+						let stringLength = utilFunctions.readModifiedLebEncodedNumber(parser);
+						let stringValue = parser.readBytes(stringLength);
+						// Remove null terminator from string
+						stringValue = stringValue.slice(0, -1).toString('utf8');
+
+						if(!fieldName)
+						{
+							break;
+						}
+
+						recordObject[fieldName] = stringValue;
+						break;
+					case FIELD_TYPE_FLOAT:
+						let floatValue = parser.readBytes(4).readFloatBE(0);
+
+						if(!fieldName)
+						{
+							break;
+						}
+
+						recordObject[fieldName] = floatValue;
+						break;
+					case FIELD_TYPE_ARRAY:
+						parser.readByte();
+						let arrayLength = utilFunctions.readModifiedLebEncodedNumber(parser);
+						let arrayObject = readChviArray(parser, arrayLength);
+
+						if(!fieldName)
+						{
+							break;
+						}
+
+						recordObject[fieldName] = arrayObject;
+						break;
+					default:
+						break;
+				}
+
+				previousByte = parser.readByte().readUInt8(0);
+			}
+			while(previousByte !== 0x00);
+
+			array.push(recordObject);
+		}
+
+		return array;
+	}
+
+
+	// Function to read a CHVI record
+	function readChviRecord(parser)
+	{
+		let recordObject = {};
+
+		while(parser.offset < (parser.buffer.length - 1))
+		{
+			let fieldBytes = parser.readBytes(3);
+			let fieldKey = utilFunctions.getUncompressedTextFromSixBitCompression(fieldBytes);
+
+			let fieldName = findFieldByFieldKey(fieldKey);
+			let fieldType = parser.readByte().readUInt8(0);
+
+			if(fieldType === 0x03)
+			{
+				parser.readBytes(1);
+				continue;
+			}
+			switch(fieldType)
+			{
+				case FIELD_TYPE_INT:
+					if(fieldName === "skinToneScale")
+					{
+						let intValue = -8355712;
+						recordObject[fieldName] = intValue;
+						parser.readBytes(4);
+						break;
+					}
+
+					let intValue = utilFunctions.readModifiedLebEncodedNumber(parser);
+
+					if(!fieldName)
+					{
+						break;
+					}
+
+					// Check for special cases that require lookups
+					if(fieldName === "slotType")
+					{
+						intValue = slotsLookup[intValue];
+					}
+					else if(fieldName === "loadoutType" || fieldName === "loadoutCategory")
+					{
+						intValue = enumLookup[fieldName][intValue];
+					}
+
+					recordObject[fieldName] = intValue;
+					break;
+				case FIELD_TYPE_STRING:
+					let stringLength = utilFunctions.readModifiedLebEncodedNumber(parser);
+					let stringValue = parser.readBytes(stringLength);
+					// Remove null terminator from string
+					stringValue = stringValue.slice(0, -1).toString('utf8');
+
+					if(!fieldName)
+					{
+						break;
+					}
+
+					recordObject[fieldName] = stringValue;
+					break;
+				case FIELD_TYPE_FLOAT:
+					let floatValue = parser.readBytes(4).readFloatBE(0);
+
+					if(!fieldName)
+					{
+						break;
+					}
+
+					recordObject[fieldName] = floatValue;
+					break;
+				case FIELD_TYPE_ARRAY:
+					parser.readByte();
+					let arrayLength = utilFunctions.readModifiedLebEncodedNumber(parser);
+					let arrayObject = readChviArray(parser, arrayLength);
+					
+					if(!fieldName)
+					{
+						break;
+					}
+
+					if(parser.readByte().readUInt8(0) !== 0x00)
+					{
+						parser.offset = parser.offset - 1;
+					}
+
+					recordObject[fieldName] = arrayObject;
+				default:
+					break;
+
+			}
+		}
+
+		return recordObject;
+	}
+
+	async function convertH2ToLeagueVisuals()
+	{
+		// Set up data buffer
+		console.log("\nEnter the path to the H2 archive file: ");
+		const visualsPath = prompt().trim().replace(/['"]/g, '');
+		let h2Data = fs.readFileSync(visualsPath);
+		let parser = new FileParser(h2Data);
+		// Read the start of the file
+		const tableBytes = parser.readBytes(3);
+		const tableName = utilFunctions.getUncompressedTextFromSixBitCompression(tableBytes);
+		const type = parser.readByte().readUInt8(0);
+		const unkBytes = parser.readBytes(2);
+		const recordCount = utilFunctions.readModifiedLebEncodedNumber(parser);
+
+		let recordsObject = {
+			characterVisualsPlayerMap: {}
+		};
+
+		// Read each record
+		for(let i = 0; i < recordCount; i++)
+		{
+			const recordKey = utilFunctions.readModifiedLebEncodedNumber(parser);
+			const recordByteSize = utilFunctions.readModifiedLebEncodedNumber(parser);
+
+			const recordData = parser.readBytes(recordByteSize);
+			const decompressedData = await decompressBuffer(recordData);
+
+			if(recordKey === 0)
+			{
+				continue;
+			}
+
+			// Parse the record data
+			let recordParser = new FileParser(decompressedData);
+			// Skip record header
+			recordParser.readBytes(4);
+			let recordObject = readChviRecord(recordParser);
+
+			recordsObject.characterVisualsPlayerMap[recordKey] = recordObject;
+		}
+
+		// Output file info
+		console.log("\nEnter the name of the output file (without extension):");
+		const outputName = prompt().trim().replace(/['"]/g, '');
+
+		// Write the JSON data to the output file
+		fs.writeFileSync(outputName + ".json", JSON.stringify(recordsObject, null, 4));
+	}
+
+	const options = ["Read raw records from H2 file", "Write raw records to H2 file", "Convert leaguevisuals JSON to H2 file", "Convert H2 file to leaguevisuals JSON", "Exit program"]; 
 
 	// Main program logic
-	console.log("Welcome to H2 Visuals Tools! This program will help you read, write, and convert H2 visuals files.\n");
+	console.log(`Welcome to H2 Visuals Tools ${VERSION_STRING}! This program will help you read, write, and convert H2 visuals files.\n`);
 	
 	do
 	{
@@ -572,6 +631,10 @@
 			await convertLeagueVisualsToH2();
 		}
 		else if(option === 4)
+		{
+			await convertH2ToLeagueVisuals();
+		}
+		else if(option === 5)
 		{
 			break;
 		}

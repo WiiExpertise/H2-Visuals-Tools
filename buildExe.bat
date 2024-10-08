@@ -1,1 +1,1 @@
-.\node_modules\.bin\esbuild h2Tools.js --bundle --minify --platform=node --target=node14.17.0 --outfile=h2Tools_build.js & nexe --build -i h2Tools_build.js -t x64-14.15.3 -r "lookupFiles/*.json" -o "h2Tools.exe" --verbose & del h2Tools_build.js
+.\node_modules\.bin\esbuild h2Tools.js --bundle --minify --platform=node --target=node14.17.0 --outfile=h2Tools_build.js & nexe --build -i h2Tools_build.js -t x64-14.15.3 -r "utils/**/*" -r "lookupFiles/*.json" -o "h2Tools.exe" --verbose & del h2Tools_build.js
